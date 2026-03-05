@@ -300,12 +300,15 @@ ${description}`;
     const { chromium } = require("playwright-extra");
 
     chromium.use(this.stealth);
+    let rate = 1;
     // 為替レート取得
-    const res = await fetch(
-      "https://api.frankfurter.app/latest?from=USD&to=JPY",
-    );
-    const data = await res.json();
-    const rate = data.rates.JPY;
+    if (process.env.VITE_RATE === "USD") {
+      const res = await fetch(
+        "https://api.frankfurter.app/latest?from=USD&to=JPY",
+      );
+      const data = await res.json();
+      rate = data.rates.JPY;
+    }
     console.log("Current USD to JPY exchange rate:", rate);
 
     const init = async (resourceId: string) => {
