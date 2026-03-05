@@ -307,13 +307,12 @@ ${description}`;
     const data = await res.json();
     const rate = data.rates.JPY;
     console.log("Current USD to JPY exchange rate:", rate);
+    const browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
     const init = async (resourceId: string) => {
       try {
-        const browser = await chromium.launch({
-          headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox"],
-        });
-
         const page = await browser.newPage();
         const blockImages = (route: any) => {
           const type = route.request().resourceType();
@@ -365,7 +364,6 @@ ${description}`;
               )
             : null,
         };
-        await browser.close();
       } catch (error) {
         console.error(
           `Error fetching data for resourceId ${resourceId}:`,
@@ -373,7 +371,9 @@ ${description}`;
         );
       }
     };
+
     await Promise.all(resourceIds.map((id) => init(id)));
+    await browser.close();
     console.log("Discogs data response:", response);
     return response;
   }
