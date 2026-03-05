@@ -309,7 +309,12 @@ ${description}`;
     console.log("Current USD to JPY exchange rate:", rate);
     const browser = await chromium.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
     });
     const init = async (resourceId: string) => {
       try {
