@@ -302,57 +302,64 @@ ${description}`;
     chromium.use(this.stealth);
 
     const init = async (resourceId: string) => {
-      const browser = await chromium.launch({ headless: true });
+      try {
+        const browser = await chromium.launch({ headless: true });
 
-      const page = await browser.newPage();
-      const blockImages = (route: any) => {
-        const type = route.request().resourceType();
+        const page = await browser.newPage();
+        const blockImages = (route: any) => {
+          const type = route.request().resourceType();
 
-        if (
-          type === "image" ||
-          type === "stylesheet" ||
-          type === "font" ||
-          type === "media"
-        ) {
-          route.abort();
-        } else {
-          route.continue();
-        }
-      };
-
-      await page.route("**/*", blockImages);
-
-      await page.goto(`https://www.discogs.com/sell/release/${resourceId}`);
-
-      await page.waitForSelector("#statistics");
-
-      const text = await page.$eval("#statistics ul.last", (el: any) => {
-        const lis = el.querySelectorAll("li");
-        let text = { lowest: "", median: "", highest: "" };
-        lis.forEach((li: any, i: any) => {
-          if (i >= 1 && i <= 3) {
-            const span = li.querySelector("span");
-            span.remove();
-            if (i === 1) text.lowest = li.textContent.trim();
-            if (i === 2) text.median = li.textContent.trim();
-            if (i === 3) text.highest = li.textContent.trim();
+          if (
+            type === "image" ||
+            type === "stylesheet" ||
+            type === "font" ||
+            type === "media"
+          ) {
+            route.abort();
+          } else {
+            route.continue();
           }
+        };
+
+        await page.route("**/*", blockImages);
+
+        await page.goto(`https://www.discogs.com/sell/release/${resourceId}`);
+
+        await page.waitForSelector("#statistics");
+
+        const text = await page.$eval("#statistics ul.last", (el: any) => {
+          const lis = el.querySelectorAll("li");
+          let text = { lowest: "", median: "", highest: "" };
+          lis.forEach((li: any, i: any) => {
+            if (i >= 1 && i <= 3) {
+              const span = li.querySelector("span");
+              span.remove();
+              if (i === 1) text.lowest = li.textContent.trim();
+              if (i === 2) text.median = li.textContent.trim();
+              if (i === 3) text.highest = li.textContent.trim();
+            }
+          });
+          return text;
         });
-        return text;
-      });
-      response[response.findIndex((r) => r.resourceId === resourceId)] = {
-        resourceId,
-        lowest: text.lowest
-          ? parseFloat(text.lowest.replace(/[^0-9.]/g, ""))
-          : null,
-        median: text.median
-          ? parseFloat(text.median.replace(/[^0-9.]/g, ""))
-          : null,
-        highest: text.highest
-          ? parseFloat(text.highest.replace(/[^0-9.]/g, ""))
-          : null,
-      };
-      await browser.close();
+        response[response.findIndex((r) => r.resourceId === resourceId)] = {
+          resourceId,
+          lowest: text.lowest
+            ? parseFloat(text.lowest.replace(/[^0-9.]/g, ""))
+            : null,
+          median: text.median
+            ? parseFloat(text.median.replace(/[^0-9.]/g, ""))
+            : null,
+          highest: text.highest
+            ? parseFloat(text.highest.replace(/[^0-9.]/g, ""))
+            : null,
+        };
+        await browser.close();
+      } catch (error) {
+        console.error(
+          `Error fetching data for resourceId ${resourceId}:`,
+          error,
+        );
+      }
     };
     await Promise.all(resourceIds.map((id) => init(id)));
     console.log("Discogs data response:", response);
