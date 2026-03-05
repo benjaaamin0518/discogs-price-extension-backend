@@ -1,13 +1,11 @@
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { discogsData, jsonResponse } from "../type/NeonApiInterface";
-import { chromium } from "playwright-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
 require("dotenv").config();
 export class NeonApi {
   private genAI = new GoogleGenAI({
     apiKey: process.env.REACT_APP_GEMINI_API_KEY || "",
   });
-  private stealth = StealthPlugin();
+  private stealth = require("puppeteer-extra-plugin-stealth")();
   public async gemini(
     title: string,
     description: string,
@@ -299,9 +297,16 @@ ${description}`;
       median: null,
       highest: null,
     }));
+    const { chromium } = require("playwright-extra");
 
     chromium.use(this.stealth);
-
+    // 為替レート取得
+    const res = await fetch(
+      "https://api.frankfurter.app/latest?from=USD&to=JPY",
+    );
+    const data = await res.json();
+    const rate = data.rates.JPY;
+    console.log("Current USD to JPY exchange rate:", rate);
     const init = async (resourceId: string) => {
       try {
         const browser = await chromium.launch({
@@ -345,16 +350,19 @@ ${description}`;
           });
           return text;
         });
+
         response[response.findIndex((r) => r.resourceId === resourceId)] = {
           resourceId,
           lowest: text.lowest
-            ? parseFloat(text.lowest.replace(/[^0-9.]/g, ""))
+            ? Math.round(parseFloat(text.lowest.replace(/[^0-9.]/g, "")) * rate)
             : null,
           median: text.median
-            ? parseFloat(text.median.replace(/[^0-9.]/g, ""))
+            ? Math.round(parseFloat(text.median.replace(/[^0-9.]/g, "")) * rate)
             : null,
           highest: text.highest
-            ? parseFloat(text.highest.replace(/[^0-9.]/g, ""))
+            ? Math.round(
+                parseFloat(text.highest.replace(/[^0-9.]/g, "")) * rate,
+              )
             : null,
         };
         await browser.close();
