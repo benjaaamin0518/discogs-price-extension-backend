@@ -3,7 +3,10 @@
   "builds": [
     {
       "src": "dist/server.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["node_modules/playwright/**/*"]
+      }
     }
   ],
   "routes": [
@@ -18,5 +21,6 @@
         "Access-Control-Allow-Headers": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version"
       }
     }
-  ]
+  ],
+  "installCommand": "npm install && npx playwright install chromium"
 }
