@@ -1,11 +1,13 @@
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { discogsData, jsonResponse } from "../type/NeonApiInterface";
+import { chromium } from "playwright-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 require("dotenv").config();
 export class NeonApi {
   private genAI = new GoogleGenAI({
     apiKey: process.env.REACT_APP_GEMINI_API_KEY || "",
   });
-  private stealth = require("puppeteer-extra-plugin-stealth")();
+  private stealth = StealthPlugin();
   public async gemini(
     title: string,
     description: string,
@@ -297,7 +299,6 @@ ${description}`;
       median: null,
       highest: null,
     }));
-    const { chromium } = require("playwright-extra");
 
     chromium.use(this.stealth);
 
