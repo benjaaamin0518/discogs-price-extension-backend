@@ -21,7 +21,7 @@ export default class ScrapeQueue {
 
   constructor(size = 5) {
     this.size = size;
-
+    console.log(`Initializing ScrapeQueue with pool size: ${size}`);
     for (let i = 0; i < size; i++) {
       this.pool.push(this.createWindow());
     }
