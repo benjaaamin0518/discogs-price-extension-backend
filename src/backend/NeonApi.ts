@@ -1,11 +1,13 @@
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
-import { discogsData, jsonResponse } from "../type/NeonApiInterface";
+import { jsonResponse } from "../type/NeonApiInterface.js";
+import { PlaywrightScrapeQueue } from "./playwrightScrapeQueue.js";
 require("dotenv").config();
 export class NeonApi {
   private genAI = new GoogleGenAI({
-    apiKey: process.env.REACT_APP_GEMINI_API_KEY || "",
+    apiKey: process.env.VITE_GEMINI_API_KEY || "",
   });
-  private stealth = require("puppeteer-extra-plugin-stealth")();
+  private queue = new PlaywrightScrapeQueue(5);
+
   public async gemini(
     title: string,
     description: string,
@@ -291,15 +293,7 @@ ${description}`;
     }
   }
   public async getDiscogsData(resourceIds: string[]) {
-    let response: discogsData[] = resourceIds.map((id) => ({
-      resourceId: id,
-      lowest: null,
-      median: null,
-      highest: null,
-    }));
-    const { chromium } = require("playwright-extra");
-
-    chromium.use(this.stealth);
+    await this.queue.init();
     let rate = 1;
     // 為替レート取得
     if (process.env.VITE_RATE === "USD") {
@@ -311,79 +305,10 @@ ${description}`;
     }
     console.log("Current USD to JPY exchange rate:", rate);
 
-    const init = async (resourceId: string) => {
-      try {
-        const browser = await chromium.launch({
-          headless: true,
-          args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-          ],
-        });
-        const page = await browser.newPage();
-        const blockImages = (route: any) => {
-          const type = route.request().resourceType();
-
-          if (
-            type === "image" ||
-            type === "stylesheet" ||
-            type === "font" ||
-            type === "media"
-          ) {
-            route.abort();
-          } else {
-            route.continue();
-          }
-        };
-
-        await page.route("**/*", blockImages);
-
-        await page.goto(`https://www.discogs.com/sell/release/${resourceId}`);
-
-        await page.waitForSelector("#statistics");
-
-        const text = await page.$eval("#statistics ul.last", (el: any) => {
-          const lis = el.querySelectorAll("li");
-          let text = { lowest: "", median: "", highest: "" };
-          lis.forEach((li: any, i: any) => {
-            if (i >= 1 && i <= 3) {
-              const span = li.querySelector("span");
-              span.remove();
-              if (i === 1) text.lowest = li.textContent.trim();
-              if (i === 2) text.median = li.textContent.trim();
-              if (i === 3) text.highest = li.textContent.trim();
-            }
-          });
-          return text;
-        });
-
-        response[response.findIndex((r) => r.resourceId === resourceId)] = {
-          resourceId,
-          lowest: text.lowest
-            ? Math.round(parseFloat(text.lowest.replace(/[^0-9.]/g, "")) * rate)
-            : null,
-          median: text.median
-            ? Math.round(parseFloat(text.median.replace(/[^0-9.]/g, "")) * rate)
-            : null,
-          highest: text.highest
-            ? Math.round(
-                parseFloat(text.highest.replace(/[^0-9.]/g, "")) * rate,
-              )
-            : null,
-        };
-        await browser.close();
-      } catch (error) {
-        console.error(
-          `Error fetching data for resourceId ${resourceId}:`,
-          error,
-        );
-      }
-    };
-
-    await Promise.all(resourceIds.map((id) => init(id)));
-    console.log("Discogs data response:", response);
-    return response;
+    const results = await Promise.all(
+      resourceIds.map(async (id) => await this.queue.scrape(id, rate)),
+    );
+    console.log("Discogs data response:", results);
+    return results;
   }
 }

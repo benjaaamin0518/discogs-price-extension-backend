@@ -1,8 +1,11 @@
 import express, { response } from "express";
 import cors from "cors";
-import { NeonApi } from "./NeonApi";
+import { NeonApi } from "./NeonApi.js";
 require("dotenv").config();
-import { geminiApiRequest, geminiApiResponse } from "../type/NeonApiInterface";
+import {
+  geminiApiRequest,
+  geminiApiResponse,
+} from "../type/NeonApiInterface.js";
 const app = express();
 const neonApi = new NeonApi();
 // CORSの設定
