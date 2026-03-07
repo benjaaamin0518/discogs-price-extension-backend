@@ -342,7 +342,7 @@ export default function startAPI() {
 
       let rate = 1;
 
-      if (process.env.VITE_RATE === "USD") {
+      if (process.env.REACT_APP_RATE === "USD") {
         const r = await fetch(
           "https://api.frankfurter.app/latest?from=USD&to=JPY",
         );

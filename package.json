@@ -18,6 +18,7 @@
     "build:tsc": "tsc -p tsconfig.json",
     "build-electron-mac": "rimraf dist && npm run build:tsc && electron-packager . --asar  --extra-resource=.env --overwrite",
     "build-electron-win": "rimraf dist && npm run build:tsc && electron-packager . --asar --platform=win32 --arch=x64 --extra-resource=.env --overwrite",
+    "build-electron-linux": "rimraf dist && npm run build:tsc && electron-packager . --asar --platform=linux --arch=x64 --extra-resource=.env --overwrite",
     "build:webpack": "cross-env NODE_ENV=\"production\" NODE_OPTIONS='--openssl-legacy-provider' webpack --config ./webpack.app.config.js"
   },
   "build": {
