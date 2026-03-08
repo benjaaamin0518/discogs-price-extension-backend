@@ -1,10 +1,12 @@
 # discogs-price-extension-backend
+
 <p align="center">
   <img src="logo.png" height="250px">
 </p>
 このプロジェクトは、Electronベースのバックエンドアプリケーションで、Discogs（ディスコグス）の価格拡張機能を提供します。主に、Vinylレコードのメタデータ抽出、Electronの特性を活かしたスクレイピング、Google Gemini AIとの統合を行います。
 
 ## 実際の動作
+
 ![alt text](demo.gif)
 
 ## 機能
@@ -132,3 +134,188 @@ APIエンドポイントの例:
 - Playwright: ウェブスクレイピング
 - @google/genai: Gemini AI API
 - React, TailwindCSS: フロントエンド（該当する場合）
+
+## GCP VM Setup (Node.js + Electron + PM2)
+
+このドキュメントでは、Google Cloud Platform (GCP) の **Compute Engine VM** 上で以下をセットアップする手順を説明します。
+
+- 最新 Node.js のインストール
+- Electron アプリの Linux ビルド
+- PM2 による常駐化
+- VM 再起動後も自動起動
+
+対象OS
+
+Ubuntu 22.04
+
+---
+
+### 1 VMにSSH接続
+
+GCP Console
+
+Compute Engine
+↓
+VM インスタンス
+↓
+SSH
+
+またはCLI
+
+```bash
+gcloud compute ssh <ユーザーID>@<インスタンス名> --project=<プロジェクトID> --zone=<ゾーン>
+```
+
+### 2 システム更新
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+```
+
+###3 最新 Node.js インストール
+
+NodeSource を使用
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_current.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+確認
+
+```bash
+node -v
+npm -v
+```
+
+### 4 必要パッケージインストール
+
+Electron をヘッドレス環境で動作させるための依存パッケージ
+
+```bash
+sudo apt install -y \
+git \
+xvfb \
+libnss3 \
+libatk-bridge2.0-0 \
+libgtk-3-0 \
+libx11-xcb1 \
+libxcomposite1 \
+libxdamage1 \
+libxrandr2 \
+libgbm1 \
+libasound2
+```
+
+### 5 リポジトリ取得
+
+```bash
+git clone https://github.com/benjaaamin0518/discogs-price-extension-backend.git
+cd discogs-price-extension-backend
+```
+
+### 6 依存関係インストール
+
+```bash
+npm install
+```
+
+### 7 Electron Linux ビルド
+
+```bash
+npm run build-electron-linux
+```
+
+ビルド後
+
+ディレクトリ内に実行ファイルが作成されます
+
+例
+`electron-discogs-price-extension-<platform>-<arch>`
+
+### 8 PM2 インストール
+
+```bash
+sudo npm install -g pm2
+```
+
+### 9 Electron アプリ起動
+
+GUI環境がないため xvfb-run を使用
+
+```bash
+ pm2 start "xvfb-run ./electron-discogs-price-extension" --name discogs-app
+```
+
+### 10 PM2 状態確認
+
+```bash
+pm2 status
+```
+
+ログ確認
+
+```bash
+pm2 logs discogs-app
+```
+
+### 11 再起動後も自動起動
+
+PM2 を systemd に登録
+
+```bash
+pm2 startup
+```
+
+表示されたコマンドを実行
+
+例
+`sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u <ユーザーID> --hp /home/<ユーザーID>`
+
+設定保存
+
+```bash
+pm2 save
+```
+
+### 12 動作確認
+
+VMを再起動
+
+```bash
+sudo reboot
+```
+
+再接続後
+
+```bash
+pm2 status
+```
+
+Electronプロセスが自動起動していれば成功です。
+
+便利コマンド
+再起動
+
+```bash
+pm2 restart discogs-app
+```
+
+停止
+
+```bash
+pm2 stop discogs-app
+```
+
+削除
+
+```bash
+pm2 delete discogs-app
+```
+
+ログ確認
+
+```bash
+pm2 logs discogs-app
+```
