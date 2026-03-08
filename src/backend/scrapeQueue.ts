@@ -1,4 +1,4 @@
-import { BrowserWindow, session } from "electron";
+import { app, BrowserView, BrowserWindow, session } from "electron";
 
 type ScrapeResult = {
   resourceId: string;
@@ -14,16 +14,18 @@ type Job = {
 };
 
 export default class ScrapeQueue {
-  private pool: BrowserWindow[] = [];
+  private pool: BrowserView[] = [];
   private queue: Job[] = [];
   private running = 0;
   private size: number;
+  private win: BrowserWindow | null = null;
 
   constructor(size = 5) {
     this.size = size;
     console.log(`Initializing ScrapeQueue with pool size: ${size}`);
+    this.win = this.createWindow();
     for (let i = 0; i < size; i++) {
-      this.pool.push(this.createWindow());
+      this.pool.push(this.createView(this.win));
     }
   }
 
@@ -36,11 +38,25 @@ export default class ScrapeQueue {
         callback({ cancel: false });
       }
     });
+
     const win = new BrowserWindow({
       show: false,
+      webPreferences: {
+        backgroundThrottling: false,
+      },
     });
-
+    win.webContents.session.setPermissionRequestHandler(() => false);
+    win.webContents.executeJavaScript(
+      `Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`,
+    );
     return win;
+  }
+  private createView(win: BrowserWindow) {
+    const view = new BrowserView();
+
+    win.setBrowserView(view);
+
+    return view;
   }
 
   scrape(resourceId: string, rate: number): Promise<ScrapeResult> {
@@ -57,14 +73,13 @@ export default class ScrapeQueue {
     const job = this.queue.shift()!;
     this.running++;
 
-    const win = this.pool.pop()!;
+    const view = this.pool.pop()!;
 
     try {
-      await win.loadURL(
+      await view.webContents.loadURL(
         `https://www.discogs.com/sell/release/${job.resourceId}`,
       );
-
-      const text = await win.webContents.executeJavaScript(`
+      const text = await view.webContents.executeJavaScript(`
 
         (()=>{
 
@@ -127,7 +142,7 @@ export default class ScrapeQueue {
       });
     }
 
-    this.pool.push(win);
+    this.pool.push(view);
     this.running--;
 
     this.next();
