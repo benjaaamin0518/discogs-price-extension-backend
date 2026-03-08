@@ -173,7 +173,7 @@ sudo apt update
 sudo apt upgrade -y
 ```
 
-###3 最新 Node.js インストール
+### 3 最新 Node.js インストール
 
 NodeSource を使用
 
