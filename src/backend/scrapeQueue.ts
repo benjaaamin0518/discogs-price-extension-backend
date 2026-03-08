@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, session } from "electron";
 
 type ScrapeResult = {
   resourceId: string;
@@ -28,6 +28,14 @@ export default class ScrapeQueue {
   }
 
   private createWindow(): BrowserWindow {
+    session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+      const blocked = ["image", "stylesheet", "font", "media"];
+      if (blocked.includes(details.resourceType)) {
+        callback({ cancel: true });
+      } else {
+        callback({ cancel: false });
+      }
+    });
     const win = new BrowserWindow({
       show: false,
     });
