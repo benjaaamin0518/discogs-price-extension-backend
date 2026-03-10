@@ -351,6 +351,15 @@ export default function startAPI() {
 
         rate = data.rates.JPY;
       }
+　　　　if (process.env.REACT_APP_RATE === "EUR") {
+        const r = await fetch(
+          "https://api.frankfurter.app/latest?from=EUR&to=JPY",
+        );
+
+        const data = await r.json();
+
+        rate = data.rates.JPY;
+      }
       console.log(`Scraping ${ids.length} resources with rate ${rate}`);
       const results = await Promise.all(
         ids.map(async (id) => await queue.scrape(id, rate)),
