@@ -351,7 +351,7 @@ export default function startAPI() {
 
         rate = data.rates.JPY;
       }
-　　　　if (process.env.REACT_APP_RATE === "EUR") {
+      if (process.env.REACT_APP_RATE === "EUR") {
         const r = await fetch(
           "https://api.frankfurter.app/latest?from=EUR&to=JPY",
         );
@@ -361,8 +361,9 @@ export default function startAPI() {
         rate = data.rates.JPY;
       }
       console.log(`Scraping ${ids.length} resources with rate ${rate}`);
+      const jobInfo = queue.createJobInfo(rate, ids);
       const results = await Promise.all(
-        ids.map(async (id) => await queue.scrape(id, rate)),
+        ids.map(async (id) => await queue.scrape(jobInfo.jobId)),
       );
 
       res.status(200).json({
