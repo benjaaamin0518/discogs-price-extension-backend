@@ -377,6 +377,29 @@ export default function startAPI() {
     }
   });
 
+  app.post("/api/v1/jobInfos", async (req, res) => {
+    try {
+      console.log("Received request for job infos:", req.body);
+      if (req.body.accessToken !== process.env.REACT_APP_ACCESS_TOKEN) {
+        res.status(401).json({
+          error: "Invalid access token",
+          status: 401,
+        });
+        return;
+      }
+      const jobInfos = queue.getJobInfos();
+
+      res.status(200).json({
+        status: 200, // ステータスコード
+        result: jobInfos, // ジョブ情報データ
+      });
+      return;
+    } catch (e) {
+      console.error("Error in jobInfos API endpoint:", e);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.listen(3000, () => {
     console.log("API running http://localhost:3000");
   });
