@@ -31,6 +31,25 @@ type JobInfo = {
   endDate: Date | null;
 };
 
+type JobStatus<T> = T extends "pendding"
+  ? { label: "待機中" } & Job
+  : T extends "success"
+    ? { label: "取得完了" } & Job
+    : T extends "inAcquisition"
+      ? { label: "取得中" }
+      : "error";
+// ジョブ情報の詳細なデータ型
+type JobInfoApiResponse = {
+  jobId: string;
+  jobStatus: JobStatus<"success" | "pendding" | "inAcquisition">[];
+  penddingJobCount: number;
+  successJobCount: number;
+  rate: number;
+  startDate: Date;
+  endDate: Date | null;
+  elapsedTime: string;
+};
+
 /**
  * ScrapeQueueクラス
  * Discogs価格情報をスクレイピングするための非同期キューを管理します
@@ -137,18 +156,19 @@ export default class ScrapeQueue {
     const jobInfo = this.jobInfos[this.jobInfoIndex[jobId].index];
     // 完了したジョブをリストに追加
     jobInfo.successJobs.push({ resourceId });
-    console.log(this.jobInfos);
+    //console.log(this.jobInfos);
 
     // すべてのジョブが完了したか確認
     if (jobInfo.successJobs.length === jobInfo.penddingJobCount) {
       jobInfo.endDate = new Date();
-      this.jobInfos.lastIndexOf(jobInfo);
+      const lastSuccessIndex = this.jobInfos.lastIndexOf(jobInfo);
       // 古いジョブ情報を削除してメモリを節約
-      if (this.jobInfos.length >= this.maxSuccessJobInfo) {
+      if (lastSuccessIndex >= this.maxSuccessJobInfo) {
         const lastIndex = this.jobInfos.lastIndexOf(undefined as any);
         console.log(`Removing job info at index ${lastIndex}`);
         this.jobInfos[lastIndex >= 0 ? lastIndex + 1 : 0] = undefined as any;
         delete this.jobInfoIndex[jobId];
+        //console.log(this.jobInfos);
       }
     }
   }
@@ -163,6 +183,61 @@ export default class ScrapeQueue {
       this.queue.push({ jobId, resolve });
       this.next();
     });
+  }
+
+  /**
+   * 現在のジョブ情報を取得
+   * @returns ジョブ情報の配列
+   */
+  public getJobInfos(): JobInfoApiResponse[] {
+    const jobInfoApiResponses: JobInfoApiResponse[] = this.jobInfos
+      .filter((info) => info !== undefined)
+      .map((info) => {
+        const sucessJobStatus: JobStatus<"success">[] = [];
+        const pendingJobStatus: JobStatus<"pendding">[] = [];
+        const inAcquisitionJobStatus: JobStatus<"inAcquisition">[] = [];
+        for (const job of info!.successJobs) {
+          sucessJobStatus.push({ label: "取得完了", ...job });
+        }
+        for (const job of info!.penddingJobs) {
+          pendingJobStatus.push({ label: "待機中", ...job });
+        }
+        let isInAcquisition =
+          info.penddingJobCount -
+            (sucessJobStatus.length + pendingJobStatus.length) !==
+          0;
+        while (isInAcquisition) {
+          inAcquisitionJobStatus.push({ label: "取得中" });
+          isInAcquisition =
+            info.penddingJobCount -
+              (sucessJobStatus.length +
+                pendingJobStatus.length +
+                inAcquisitionJobStatus.length) !==
+            0;
+        }
+
+        return {
+          jobId: info!.jobId,
+          jobStatus: [
+            ...sucessJobStatus,
+            ...inAcquisitionJobStatus,
+            ...pendingJobStatus,
+          ],
+          penddingJobCount: info!.penddingJobCount,
+          successJobCount: info!.successJobs.length,
+          rate: info!.rate,
+          startDate: info!.startDate,
+          endDate: info!.endDate,
+          elapsedTime: info!.endDate
+            ? `${Math.round(
+                (info!.endDate.getTime() - info!.startDate.getTime()) / 1000,
+              )}秒`
+            : `${Math.round(
+                (new Date().getTime() - info!.startDate.getTime()) / 1000,
+              )}秒`,
+        };
+      });
+    return jobInfoApiResponses;
   }
 
   /**
@@ -255,6 +330,7 @@ export default class ScrapeQueue {
     }
     // ジョブ完了情報を記録
     this.refreshJobInfos(queue.jobId, job.resourceId);
+    console.log(this.getJobInfos());
     // BrowserViewをプールに戻す
     this.pool.push(view);
     this.running--;
