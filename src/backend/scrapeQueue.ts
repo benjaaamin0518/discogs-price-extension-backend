@@ -97,7 +97,7 @@ export default class ScrapeQueue {
   private size: number;
   private win: BrowserWindow | null = null;
   private maxSuccessJobInfo: number = parseInt(
-    process.env.REACT_APP_POOL_SIZE || "5",
+    process.env.REACT_APP_MAX_SUCCESS || "5",
   ); // 保持する完了ジョブ情報の最大数
   private jobInfos: JobInfo[] = []; // ジョブ情報の履歴
   private jobInfoIndex: Record<string, { index: number }> = {}; // ジョブIDからインデックスへのマッピング
