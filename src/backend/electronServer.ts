@@ -116,15 +116,17 @@ export default function startAPI() {
       ## artist
 
       The main artist name of the release.
-      
-      **The artist name must ALWAYS be returned in English (Roman alphabet).** If the input is in Japanese or another language, translate or transliterate it to its standard English/Romanized name (e.g., "Tatsuro Yamashita" instead of "山下達郎").
+
+      **Return the artist name exactly as it appears in the input whenever possible.**  
+      Avoid translating or altering the language unnecessarily. Preserve the original script (Japanese, English, etc.) unless normalization is clearly required.
 
       ---
 
       ## title
 
       The title of the release. 
-      **Extract the title EXACTLY as it appears.** Strip away unnecessary tags, but ensure the core title remains in its original language. Do not attempt to translate it into English or modify its character set.
+
+      **Extract the title EXACTLY as it appears.** Strip away unnecessary tags, but ensure the core title remains in its original language. Do not attempt to translate it or modify its character set.
 
       ---
 
@@ -195,19 +197,26 @@ export default function startAPI() {
 
       ### Size mapping
 
-      LP → include **12"** 12" → include **12"** 7" → include **7"** 10" → include **10"**
+      LP → include **12"**  
+      12" → include **12"**  
+      7" → include **7"**  
+      10" → include **10"**
 
       ### Speed mapping
 
-      33rpm / 33 RPM → **33 ⅓ RPM** 45rpm / 45 RPM → **45 RPM**
+      33rpm / 33 RPM → **33 ⅓ RPM**  
+      45rpm / 45 RPM → **45 RPM**
 
       ### Release type mapping
 
-      single → **Single** ep → **EP** album → **Album**
+      single → **Single**  
+      ep → **EP**  
+      album → **Album**
 
       ### Audio type mapping
 
-      stereo → **Stereo** mono → **Mono**
+      stereo → **Stereo**  
+      mono → **Mono**
 
       ---
 
