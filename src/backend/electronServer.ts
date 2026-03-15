@@ -358,15 +358,11 @@ export default function startAPI() {
         rate = data.rates.JPY;
       }
       console.log(`Scraping ${ids.length} resources with rate ${rate}`);
-      const jobInfo = queue.createJobInfo(rate, ids);
-      // resourceIds の数だけキューに enqueue する（各 scrape が 1 リソースを処理）
-      // scrape() は Promise を返すので個別に処理を待ちたい場合は Promise.all を使える
-      for (let i = 0; i < ids.length; i++) {
-        // 各 enqueue は jobId を渡すだけで、ScrapeQueue が penddingJobs から実リソースを shift する
-        queue.scrape(jobInfo.jobId);
-      }
-
-      return res.json({ jobId: jobInfo.jobId });
+      const jobInfo = queue.createJobInfo(rate, ids, req.body.jobId);
+      const results = await Promise.all(
+        ids.map(async (id) => await queue.scrape(jobInfo.jobId)),
+      );
+      return res.json(results);
 
       // res.status(200).json({
       //   status: 200, // ステータスコード
@@ -384,7 +380,7 @@ export default function startAPI() {
    */
   app.post("/api/scrape/:jobId", authMiddleware, (req, res) => {
     const { jobId } = req.params;
-    console.log(jobId);
+    // console.log(jobId);
     if (typeof jobId !== "string")
       return res.status(404).json({ error: "jobId is not string" });
     const job = queue.getJobInfo(jobId);

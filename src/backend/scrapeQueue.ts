@@ -1,6 +1,4 @@
-import { app, BrowserView, BrowserWindow, session } from "electron";
-import { v4 as uuidv4 } from "uuid";
-
+import { BrowserView, BrowserWindow, session } from "electron";
 // ScrapeResult describes the price information extracted from a single Discogs
 // release page.  Prices are converted using the provided rate and may be `null`
 // if the value could not be determined (for example if the page layout changed
@@ -49,7 +47,7 @@ type Queue = {
 // ジョブ情報の詳細なデータ型
 type JobInfo = {
   jobId: string;
-  successJobs: ScrapeResult[];
+  successJobs: Job[];
   penddingJobs: Job[];
   penddingJobCount: number;
   rate: number;
@@ -81,7 +79,6 @@ type JobInfoApiResponse = {
   jobStatus: JobStatus<"success" | "pendding" | "inAcquisition">[];
   penddingJobCount: number;
   successJobCount: number;
-  successJobs: ScrapeResult[];
   rate: number;
   startDate: Date;
   endDate: Date | null;
@@ -105,13 +102,6 @@ export default class ScrapeQueue {
   private CLEANUP_INTERVAL_MS = parseInt(
     process.env.REACT_APP_CLEANUP_INTERVAL_MS || "600000",
   );
-  private COMPLETED_TTL_MS = parseInt(
-    process.env.REACT_APP_COMPLETED_TTL_MS || "600000",
-  );
-  // NOTE: 環境変数の名前ミスの可能性があるので必要なら修正を検討してください
-  private JOB_RETENTION_MS = parseInt(
-    process.env.REACT_APP_COMPLETED_TTL_MS || "600000",
-  );
   private jobInfos: (JobInfo | undefined)[] = []; // undefined を許す配列に
   private jobInfoIndex: Record<string, { index: number }> = {}; // ジョブIDからインデックスへのマッピング
 
@@ -123,8 +113,6 @@ export default class ScrapeQueue {
     for (let i = 0; i < size; i++) {
       this.pool.push(this.createView(this.win));
     }
-    // this を正しく束縛する
-    setInterval(() => this.cleanupJobs(), this.CLEANUP_INTERVAL_MS);
   }
   /**
    * 隠しウィンドウを作成
@@ -167,9 +155,13 @@ export default class ScrapeQueue {
 
     return view;
   }
-  public createJobInfo(rate: number, resourceIds: string[]): JobInfo {
+  public createJobInfo(
+    rate: number,
+    resourceIds: string[],
+    jobId: string,
+  ): JobInfo {
     const jobInfo: JobInfo = {
-      jobId: uuidv4(),
+      jobId,
       successJobs: [],
       // penddingJobs は最初 resourceIds 全体をコピー
       penddingJobs: resourceIds.map((id) => ({ resourceId: id })),
@@ -189,9 +181,9 @@ export default class ScrapeQueue {
     return jobInfo;
   }
 
-  private refreshJobInfos(jobId: string, result: ScrapeResult) {
+  private refreshJobInfos(jobId: string, resourceId: string) {
     console.log(
-      `Refreshing job info for jobId ${jobId} and resourceId ${result.resourceId}`,
+      `Refreshing job info for jobId ${jobId} and resourceId ${resourceId}`,
     );
     const idx = this.jobInfoIndex[jobId];
     if (!idx) {
@@ -201,7 +193,7 @@ export default class ScrapeQueue {
     const jobInfo = this.jobInfos[idx.index];
     if (!jobInfo) return;
 
-    jobInfo.successJobs.push(result);
+    jobInfo.successJobs.push({ resourceId });
     jobInfo.updatedAt = new Date();
 
     // すべてのジョブが完了したかチェック
@@ -212,34 +204,13 @@ export default class ScrapeQueue {
       if (lastSuccessIndex >= this.MAX_SUCCESS_JOB_LIMIT) {
         const lastIndex = this.jobInfos.lastIndexOf(undefined as any);
         console.log(`Removing job info at index ${lastIndex}`);
+        delete this.jobInfoIndex[
+          this.jobInfos[lastIndex >= 0 ? lastIndex + 1 : 0]!.jobId
+        ];
         this.jobInfos[lastIndex >= 0 ? lastIndex + 1 : 0] = undefined as any;
-        delete this.jobInfoIndex[jobId];
       }
     }
   }
-
-  private cleanupJobs() {
-    const now = new Date();
-    for (let i = 0; i < this.jobInfos.length; i++) {
-      const job = this.jobInfos[i];
-      if (!job) continue;
-      const age = now.getTime() - job.createdAt.getTime();
-
-      if (job.successJobs.length === job.penddingJobCount) {
-        if (now.getTime() - job.updatedAt.getTime() > this.COMPLETED_TTL_MS) {
-          this.jobInfos[this.jobInfoIndex[job.jobId].index] = undefined as any;
-          delete this.jobInfoIndex[job.jobId];
-          continue;
-        }
-      }
-      // general TTL
-      if (age > this.JOB_RETENTION_MS) {
-        this.jobInfos[this.jobInfoIndex[job.jobId].index] = undefined as any;
-        delete this.jobInfoIndex[job.jobId];
-      }
-    }
-  }
-
   // queue への登録はそのまま
   scrape(jobId: string): Promise<ScrapeResult> {
     return new Promise((resolve) => {
@@ -306,7 +277,6 @@ export default class ScrapeQueue {
       ],
       penddingJobCount: info.penddingJobCount,
       successJobCount: info.successJobs.length,
-      successJobs: info.successJobs,
       rate: info.rate,
       startDate: info.startDate,
       endDate: info.endDate,
@@ -411,8 +381,8 @@ export default class ScrapeQueue {
       queue.resolve(result);
     }
     // 完了したジョブをバッチのメタ情報に反映する
-    this.refreshJobInfos(queue.jobId, result);
-    console.log(this.getJobInfos());
+    this.refreshJobInfos(queue.jobId, result.resourceId);
+    // console.log(this.getJobInfos());
     // 使用していた BrowserView を返却して別ジョブに使えるようにする
     this.pool.push(view);
     this.running--;
