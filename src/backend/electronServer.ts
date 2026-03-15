@@ -12,6 +12,7 @@ import dotenv from "dotenv";
 import { app } from "electron";
 import path from "path";
 import { dir } from "console";
+import { authMiddleware } from "./serverAuth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,16 +34,10 @@ export default function startAPI() {
   app.use(express.json({ limit: "10mb" }));
   app.post(
     "/api/v1/gemini",
+    authMiddleware,
     async (req: geminiApiRequest, res: geminiApiResponse) => {
       try {
         console.log("Received request:", req.body);
-        if (req.body.accessToken !== process.env.REACT_APP_ACCESS_TOKEN) {
-          res.status(401).json({
-            error: "Invalid access token",
-            status: 401,
-          });
-          return;
-        }
         const { title, description } = req.body;
         const prompt = `You are a vinyl record metadata extraction system used for Discogs search.
 
@@ -337,16 +332,9 @@ export default function startAPI() {
     },
   );
 
-  app.post("/api/v1/discogsData", async (req, res) => {
+  app.post("/api/v1/discogsData", authMiddleware, async (req, res) => {
     try {
       console.log("Received request:", req.body);
-      if (req.body.accessToken !== process.env.REACT_APP_ACCESS_TOKEN) {
-        res.status(401).json({
-          error: "Invalid access token",
-          status: 401,
-        });
-        return;
-      }
       const ids = req.body.resourceIds as string[];
 
       let rate = 1;
@@ -371,31 +359,42 @@ export default function startAPI() {
       }
       console.log(`Scraping ${ids.length} resources with rate ${rate}`);
       const jobInfo = queue.createJobInfo(rate, ids);
-      const results = await Promise.all(
-        ids.map(async (id) => await queue.scrape(jobInfo.jobId)),
-      );
+      // resourceIds の数だけキューに enqueue する（各 scrape が 1 リソースを処理）
+      // scrape() は Promise を返すので個別に処理を待ちたい場合は Promise.all を使える
+      for (let i = 0; i < ids.length; i++) {
+        // 各 enqueue は jobId を渡すだけで、ScrapeQueue が penddingJobs から実リソースを shift する
+        queue.scrape(jobInfo.jobId);
+      }
 
-      res.status(200).json({
-        status: 200, // ステータスコード
-        result: results, // 結果データ
-      });
-      return;
+      return res.json({ jobId: jobInfo.jobId });
+
+      // res.status(200).json({
+      //   status: 200, // ステータスコード
+      //   result: results, // 結果データ
+      // });
+      // return;
     } catch (e) {
       console.error("Error in API endpoint:", e);
       res.status(500).json({ error: "Internal server error" });
     }
   });
+  /**
+   * POST /api/scrape/:jobId
+   * 特定 jobId の現在状態を返す
+   */
+  app.post("/api/scrape/:jobId", authMiddleware, (req, res) => {
+    const { jobId } = req.params;
+    console.log(jobId);
+    if (typeof jobId !== "string")
+      return res.status(404).json({ error: "jobId is not string" });
+    const job = queue.getJobInfo(jobId);
+    if (!job) return res.status(404).json({ error: "job not found" });
+    return res.json(job);
+  });
 
-  app.post("/api/v1/jobInfos", async (req, res) => {
+  app.post("/api/v1/jobInfos", authMiddleware, async (req, res) => {
     try {
       console.log("Received request for job infos:", req.body);
-      if (req.body.accessToken !== process.env.REACT_APP_ACCESS_TOKEN) {
-        res.status(401).json({
-          error: "Invalid access token",
-          status: 401,
-        });
-        return;
-      }
       const jobInfos = queue.getJobInfos();
 
       res.status(200).json({
