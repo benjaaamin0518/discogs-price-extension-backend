@@ -1,13 +1,11 @@
 import { BrowserView, BrowserWindow, session } from "electron";
-// ScrapeResult describes the price information extracted from a single Discogs
-// release page.  Prices are converted using the provided rate and may be `null`
-// if the value could not be determined (for example if the page layout changed
-// or the request failed).
-//
-// `resourceId` is the Discogs release identifier used in the URL, and the
-// other three fields correspond to the lowest, median and highest prices found.
-// They are stored as numbers in the target currency or `null` when unavailable.
 
+/**
+ * ScrapeResult
+ * Discogs のリリースページから抽出した価格情報を表す型。
+ * - resourceId: 対象リリースの識別子（URL の一部）
+ * - lowest / median / highest: 対象通貨に変換された数値、取得不可なら null
+ */
 type ScrapeResult = {
   // Discogs release identifier for the item being scraped
   resourceId: string;
@@ -19,34 +17,39 @@ type ScrapeResult = {
   highest: number | null;
 };
 
-// ジョブとしてキューに入る単一のスクレイピング対象
-// `resourceId` は Discogs のリリースページを示す識別子
-
-// スクレイピングジョブのデータ型
+/**
+ * Job
+ * キューに入る単一スクレイピング対象の型
+ * - resourceId: Discogs の release ページを特定する ID
+ */
 type Job = {
   resourceId: string;
 };
 
-// キューに格納されるエントリの型。
-// `jobId` は createJobInfo で生成された一意の識別子で、
-// Promise の解決関数 `resolve` が付属する。
-// enqueue されたとき resolve が呼ばれ結果が返却される。
-
+/**
+ * Queue
+ * キューに格納するエントリ型。
+ * - jobId: createJobInfo で生成された一意のジョブバッチ ID
+ * - resolve: このジョブが完了したときに呼ばれる Promise の解決関数
+ */
 type Queue = {
   jobId: string;
   resolve: (value: ScrapeResult) => void;
 };
 
-// 1つのスクレイピングバッチに関するメタデータを保持する型。
-// このインスタンスがキューに入るとジョブごとに結果が集まっていく。
-//
-// - `successJobs` : 完了したジョブのリスト
-// - `penddingJobs`: まだ実行されていないジョブのリスト
-// - `penddingJobCount`: バッチ内の総ジョブ数（開始時に penddingJobs.length と同じ）
-
-// ジョブ情報の詳細なデータ型
+/**
+ * JobInfo
+ * 1 つのスクレイピングバッチに関するメタデータを保持する型。
+ * - successJobs: 完了したジョブの配列
+ * - penddingJobs: 未処理（待機中）のジョブ配列（コード内プロパティ名は `penddingJobs`）
+ * - penddingJobCount: バッチ内の総ジョブ数（開始時に penddingJobs.length と同値）
+ * - rate: 取得した価格に掛ける換算率
+ * - startDate / endDate: バッチ開始・終了時刻
+ * - createdAt / updatedAt: 管理用タイムスタンプ
+ *
+ * 注意: 実装上プロパティ名に "pendding" が使われています（スペルミス）。型や外部 API に影響を与えない範囲で将来的に修正することを推奨します。
+ */
 type JobInfo = {
-  jobId: string;
   successJobs: Job[];
   penddingJobs: Job[];
   penddingJobCount: number;
@@ -56,12 +59,16 @@ type JobInfo = {
   createdAt: Date;
   updatedAt: Date;
 };
+type JobInfoMap = Map<string, JobInfo>;
 
-// ジョブの状態を表現するヘルパー型。
-// ジェネリクスを使って特定の状態を表したり、readonly タイプを生成
-// 出来るようにしている。API 応答用にラベル付きの変種として
-// 利用される。
-
+/**
+ * JobStatus<T>
+ * ジョブの状態を表すヘルパー型。ジェネリクスで状態を指定可能。
+ * - "pendding"（待機中） / "success"（取得完了） / "inAcquisition"（取得中） / "error"
+ *
+ * 注意: 型パラメータに使う文字列はコード内の命名と合わせていますが、
+ * コメント中は通常の英単語（pending, success, in-acquisition）で説明しています。
+ */
 type JobStatus<T> = T extends "pendding"
   ? { label: "待機中" } & Job
   : T extends "success"
@@ -69,11 +76,13 @@ type JobStatus<T> = T extends "pendding"
     : T extends "inAcquisition"
       ? { label: "取得中" }
       : "error";
-// 外部 API に返却するために整形されたジョブ情報。
-// 内部の JobInfo とほぼ同じだが、状態一覧や経過時間の文字列を含む。
-// elapsedTime は現在時刻または endDate から計算される。
 
-// ジョブ情報の詳細なデータ型
+/**
+ * JobInfoApiResponse
+ * 外部 API に返却する形式に整形した JobInfo。
+ * - jobStatus: 各ジョブの一覧（ラベル付き）
+ * - elapsedTime: 開始からの経過時間（秒）を文字列化したもの
+ */
 type JobInfoApiResponse = {
   jobId: string;
   jobStatus: JobStatus<"success" | "pendding" | "inAcquisition">[];
@@ -86,84 +95,106 @@ type JobInfoApiResponse = {
 };
 
 /**
- * ScrapeQueueクラス
- * Discogs価格情報をスクレイピングするための非同期キューを管理します
- * BrowserViewのプールを使用して複数のリクエストを効率的に処理します
+ * ScrapeQueue クラス
+ * - BrowserView のプールを使い並列スクレイピングを管理する非同期キュー
+ * - BrowserView を再利用してメモリ・リソースの churn を抑える
+ * - 完了ジョブ情報を一定数だけ保持し、古いものから prune する
  */
 export default class ScrapeQueue {
+  // BrowserView プール（再利用）
   private pool: BrowserView[] = [];
+  // 実行待ちキュー（FIFO）
   private queue: Queue[] = [];
+  // 現在実行中のジョブ数
   private running = 0;
+  // プールサイズ（同時実行数の上限）
   private size: number;
+  // pool に割り当てる隠しウィンドウ。show: false で UI 表示を抑える
   private win: BrowserWindow | null = null;
+  // 成功ジョブ情報を保持する最大件数（古いものから削除）
   private MAX_SUCCESS_JOB_LIMIT: number = parseInt(
     process.env.REACT_APP_MAX_SUCCESS || "5",
-  ); // 保持する完了ジョブ情報の最大数
-  private CLEANUP_INTERVAL_MS = parseInt(
-    process.env.REACT_APP_CLEANUP_INTERVAL_MS || "600000",
   );
-  private jobInfos: (JobInfo | undefined)[] = []; // undefined を許す配列に
-  private jobInfoIndex: Record<string, { index: number }> = {}; // ジョブIDからインデックスへのマッピング
+  // job 情報のマップ。将来 undefined にする必要がないなら型は Map のみで良い
+  private jobInfos: JobInfoMap | undefined = new Map();
 
   constructor(size = 5) {
     this.size = size;
     console.log(`Initializing ScrapeQueue with pool size: ${size}`);
+    // 隠しウィンドウを一つ作成し、そこに BrowserView をセットして使い回す
     this.win = this.createWindow();
-    // 指定されたサイズのBrowserViewプールを初期化
+    // プールを初期化（BrowserView を size 個生成）
     for (let i = 0; i < size; i++) {
       this.pool.push(this.createView(this.win));
     }
   }
+
   /**
-   * 隠しウィンドウを作成
-   * 画像やスタイルシートの読込をブロックして性能を最適化
+   * createWindow
+   * - 表示しない（headless 風） BrowserWindow を生成
+   * - 画像やスタイル等の不要リソースをブロックして帯域／レンダ負荷を軽減
+   * - 全ての permission リクエストは無条件で拒否（このウィンドウは UI を表示しないため）
+   * - navigator.webdriver を undefined に上書きして、簡易的なボット判定回避を試みる
+   *
+   * 注: 本関数ではセッション全体（session.defaultSession）に onBeforeRequest を登録しています。
+   * アプリ内の他の web コンテンツにも影響を与える可能性があるため、必要に応じて
+   * 別セッションを作成して割り当てる検討をおすすめします。
    */
   private createWindow(): BrowserWindow {
-    // 不要なリソースタイプをブロック
+    // 読み込みをキャンセルするリソース種別を指定して軽量化
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
       const blocked = ["image", "stylesheet", "font", "media"];
       if (blocked.includes(details.resourceType)) {
+        // キャンセルしてリソースを取得しない
         callback({ cancel: true });
       } else {
         callback({ cancel: false });
       }
     });
+
     const win = new BrowserWindow({
-      show: false,
+      show: false, // 表示しない（バックグラウンドで動作）
       webPreferences: {
-        backgroundThrottling: false,
+        backgroundThrottling: false, // バックグラウンドでも throttling しない
       },
     });
-    // 全てのパーミッションリクエストを無条件に拒否する。
-    // このウィンドウは開かれないため、許可を求められることは不要。
+
+    // permission 要求は不要なので無条件拒否にする（セキュリティ上も安全）
     win.webContents.session.setPermissionRequestHandler(() => false);
 
-    // Discogs 側のボット検出を回避するため、webdriver フラグを
-    // undefined にしてヘッドレス環境を隠蔽する。
+    // headless っぽさを減らすため navigator.webdriver を undefined にする試み
+    // （ページ側のボット検出を完全に回避するものではありません）
     win.webContents.executeJavaScript(
       `Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`,
     );
     return win;
   }
+
   /**
-   * BrowserViewを作成して指定されたウィンドウに設定
+   * createView
+   * - BrowserView を生成して隠しウィンドウにセットして返す
+   * - 生成した view は pool で再利用する想定
    */
   private createView(win: BrowserWindow) {
     const view = new BrowserView();
-
     win.setBrowserView(view);
-
     return view;
   }
+
+  /**
+   * createJobInfo
+   * - 新しいバッチ（jobId）を作成して jobInfos に登録する
+   * - penddingJobs（コード上のプロパティ名は `penddingJobs`）には resourceIds のコピーを格納
+   * - 返却値は受け取った jobId をそのまま返す（API の都合でこの形）
+   */
   public createJobInfo(
     rate: number,
     resourceIds: string[],
     jobId: string,
-  ): JobInfo {
+  ): string {
     const jobInfo: JobInfo = {
-      jobId,
       successJobs: [],
-      // penddingJobs は最初 resourceIds 全体をコピー
+      // penddingJobs は最初 resourceIds 全体をコピー（待機中リスト）
       penddingJobs: resourceIds.map((id) => ({ resourceId: id })),
       rate,
       penddingJobCount: resourceIds.length,
@@ -172,25 +203,26 @@ export default class ScrapeQueue {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    // 配列へ追加し、インデックスを保持（後で高速検索に使用）
-    const index = this.jobInfos.push(jobInfo);
-    this.jobInfoIndex[jobInfo.jobId] = {
-      index: index - 1,
-    };
+    this.jobInfos?.set(jobId, jobInfo);
     console.log(`Created job info:`, jobInfo);
-    return jobInfo;
+    return jobId;
   }
 
+  /**
+   * refreshJobInfos
+   * - 1 件ジョブが完了したときに呼び、JobInfo を更新する
+   * - 全ジョブが完了したら endDate を設定し、古い JobInfo を prune（削除）する
+   *
+   * prune ロジック:
+   * - jobInfos のキー一覧を取得し、保存件数が MAX_SUCCESS_JOB_LIMIT 以上なら
+   *   古いキー（配列先頭）を削除するシンプルな実装。
+   * - 注意: 並列性や順序保証が必要ならより堅牢な実装（LRU 等）を検討してください。
+   */
   private refreshJobInfos(jobId: string, resourceId: string) {
     console.log(
       `Refreshing job info for jobId ${jobId} and resourceId ${resourceId}`,
     );
-    const idx = this.jobInfoIndex[jobId];
-    if (!idx) {
-      console.warn(`Unknown jobId ${jobId} in refreshJobInfos`);
-      return;
-    }
-    const jobInfo = this.jobInfos[idx.index];
+    const jobInfo = this.jobInfos?.get(jobId);
     if (!jobInfo) return;
 
     jobInfo.successJobs.push({ resourceId });
@@ -199,19 +231,19 @@ export default class ScrapeQueue {
     // すべてのジョブが完了したかチェック
     if (jobInfo.successJobs.length === jobInfo.penddingJobCount) {
       jobInfo.endDate = new Date();
-      // prune ロジックは保持（必要なら改善）
-      const lastSuccessIndex = this.jobInfos.lastIndexOf(jobInfo);
-      if (lastSuccessIndex >= this.MAX_SUCCESS_JOB_LIMIT) {
-        const lastIndex = this.jobInfos.lastIndexOf(undefined as any);
-        console.log(`Removing job info at index ${lastIndex}`);
-        delete this.jobInfoIndex[
-          this.jobInfos[lastIndex >= 0 ? lastIndex + 1 : 0]!.jobId
-        ];
-        this.jobInfos[lastIndex >= 0 ? lastIndex + 1 : 0] = undefined as any;
+      // 保持上限を超えていれば古いものを削除する（FIFO）
+      const keys = Array.from(this.jobInfos!.keys());
+      if (keys.length > this.MAX_SUCCESS_JOB_LIMIT) {
+        this.jobInfos?.delete(keys[0]);
       }
     }
   }
-  // queue への登録はそのまま
+
+  /**
+   * scrape
+   * - 外部からキューにジョブを登録するためのメソッド
+   * - Promise を返し、内部でその resolve 関数を保存してジョブ完了時に呼ぶ
+   */
   scrape(jobId: string): Promise<ScrapeResult> {
     return new Promise((resolve) => {
       this.queue.push({ jobId, resolve });
@@ -220,29 +252,31 @@ export default class ScrapeQueue {
   }
 
   /**
-   * 単一ジョブを API 出力フォーマットで取得するユーティリティ
+   * getJobInfo
+   * - 単一のバッチの情報を API レスポンス形式で取得するヘルパー
    */
   public getJobInfo(jobId: string): JobInfoApiResponse | null {
-    const idx = this.jobInfoIndex[jobId];
-    if (!idx) return null;
-    const info = this.jobInfos[idx.index];
+    const info = this.jobInfos?.get(jobId);
     if (!info) return null;
-    return this.toApiResponse(info);
+    return this.toApiResponse(jobId, info);
   }
 
   /**
-   * 既存の getJobInfos を内部ユーティリティ toApiResponse でクリアに
+   * getJobInfos
+   * - 保持しているすべての JobInfo を API レスポンス形式に整形して返す
    */
   public getJobInfos(): JobInfoApiResponse[] {
-    return this.jobInfos
-      .filter((info) => info !== undefined)
-      .map((info) => this.toApiResponse(info!));
+    return Array.from(this.jobInfos!.entries()).map(([key, info]) =>
+      this.toApiResponse(key!, info!),
+    );
   }
 
   /**
-   * JobInfo -> JobInfoApiResponse に変換する共通ロジック（重複回避）
+   * toApiResponse
+   * - 内部の JobInfo を外部 API 用の構造（JobInfoApiResponse）に変換する共通ロジック
+   * - jobStatus 配列は「取得完了」「取得中」「待機中」の順で返す
    */
-  private toApiResponse(info: JobInfo): JobInfoApiResponse {
+  private toApiResponse(jobId: string, info: JobInfo): JobInfoApiResponse {
     const sucessJobStatus: JobStatus<"success">[] = [];
     const pendingJobStatus: JobStatus<"pendding">[] = [];
     const inAcquisitionJobStatus: JobStatus<"inAcquisition">[] = [];
@@ -254,6 +288,8 @@ export default class ScrapeQueue {
       pendingJobStatus.push({ label: "待機中", ...job });
     }
 
+    // penddingJobCount（総数）から success + pending の数を引いて、
+    // 残りを「取得中」と見なして補完する（数を合わせるためのループ）
     let isInAcquisition =
       info.penddingJobCount -
         (sucessJobStatus.length + pendingJobStatus.length) !==
@@ -269,7 +305,7 @@ export default class ScrapeQueue {
     }
 
     return {
-      jobId: info.jobId,
+      jobId: jobId,
       jobStatus: [
         ...sucessJobStatus,
         ...inAcquisitionJobStatus,
@@ -285,25 +321,42 @@ export default class ScrapeQueue {
         : `${Math.round((new Date().getTime() - info.startDate.getTime()) / 1000)}秒`,
     };
   }
+
   /**
-   * キューから次のジョブを取得して実行
-   * プール内で利用可能なBrowserViewがある場合のみ実行
+   * next
+   * - キューから次のジョブを取り出して実行するコア処理
+   * - 同時実行数が this.size を超えないように制御
+   * - BrowserView はプールから pop して使用後に push で戻す（再利用）
+   *
+   * 流れ:
+   * 1. running >= size なら何もしない（上限）
+   * 2. キューが空なら何もしない
+   * 3. queue から 1 件取り出し、対応する JobInfo の penddingJobs から 1 件を shift
+   * 4. BrowserView をプールから借り、ページ読み込み → DOM 抽出スクリプト実行
+   * 5. 結果を解析して resolve を呼び、jobInfos を更新、BrowserView を返却
+   * 6. queue に残りがあれば再帰的に next() を呼ぶ
+   *
+   * 注意点:
+   * - view.webContents.loadURL / executeJavaScript が例外を投げた場合でも
+   *   queue.resolve を必ず呼んでいる（呼び出し元は null を受け取り処理する想定）
+   * - BrowserView の数がプールより多い／少ないケースや、view が破棄された場合
+   *   の保護（null チェックや例外処理の強化）が必要であれば追加実装を推奨
    */
   private async next() {
-    // プール内で同時に処理できる数を超えていれば何もしない
+    // 同時実行数が上限に達していたら何もしない
     if (this.running >= this.size) return;
-    // そもそもキューが空だったら終了
+    // キューが空なら終了
     if (this.queue.length === 0) return;
 
-    // キューから1件取り出す
+    // FIFO で 1 件取り出す
     const queue = this.queue.shift()!;
-    const jobInfo = this.jobInfos[this.jobInfoIndex[queue.jobId].index]!;
-    const job = jobInfo.penddingJobs.shift()!; // 実際のリソースID
+    const jobInfo = this.jobInfos?.get(queue.jobId)!;
+    const job = jobInfo.penddingJobs.shift()!; // 実際にスクレイプするリソース ID
 
-    // 同時実行カウントを増やす
+    // 実行カウントを増やす
     this.running++;
 
-    // 使用可能な BrowserView をプールから借りる
+    // プールから BrowserView を借りる（存在しない場合はエラーになるため前提として十分な数を用意する）
     const view = this.pool.pop()!;
     let result: ScrapeResult = {
       resourceId: job.resourceId,
@@ -313,12 +366,13 @@ export default class ScrapeQueue {
     };
 
     try {
-      // 対象ページに移動
+      // 対象ページへ移動
       await view.webContents.loadURL(
         `https://www.discogs.com/sell/release/${job.resourceId}`,
       );
 
-      // DOM から統計情報を引き抜くスクリプトを実行
+      // ページ内から統計情報を抽出する簡易スクリプトを実行
+      // -> DOM 構造が変わると取得できなくなるため、取得箇所の堅牢化やフォールバックを検討してください
       const text = await view.webContents.executeJavaScript(`
 
         (()=>{
@@ -349,45 +403,43 @@ export default class ScrapeQueue {
 
       `);
 
-      // スクレイピング結果を解析して価格を抽出
+      // 取得文字列から数値部分のみ抽出して換算率を適用
       result = {
         resourceId: job.resourceId,
-        // 数字部分だけ抜き出し換算率をかける
         lowest: text.lowest
           ? Math.round(
               parseFloat(text.lowest.replace(/[^0-9.]/g, "")) * jobInfo.rate,
             )
           : null,
-        // 同じく中央値
         median: text.median
           ? Math.round(
               parseFloat(text.median.replace(/[^0-9.]/g, "")) * jobInfo.rate,
             )
           : null,
-        // 最高値
         highest: text.highest
           ? Math.round(
               parseFloat(text.highest.replace(/[^0-9.]/g, "")) * jobInfo.rate,
             )
           : null,
       };
-      // 正常に取得できた場合はログを残して Promise を解決
+      // 正常取得時のログと Promise 解決
       console.log(`Scraped resourceId ${job.resourceId}:`, result);
       queue.resolve(result);
     } catch (e) {
-      // ページ構造が変わったりネットワークエラーが発生した場合など
-      // ここに到達する。呼び出し元は null 値を受け取って処理する。
+      // ネットワークエラーや DOM 取得失敗時のフォールバック
       console.error(`Error scraping resourceId ${job.resourceId}:`, e);
+      // 呼び出し元は null のフィールドを受け取り適切に扱う想定
       queue.resolve(result);
     }
-    // 完了したジョブをバッチのメタ情報に反映する
+
+    // バッチメタ情報を更新
     this.refreshJobInfos(queue.jobId, result.resourceId);
-    // console.log(this.getJobInfos());
-    // 使用していた BrowserView を返却して別ジョブに使えるようにする
+
+    // 使用した BrowserView をプールに戻して再利用可能にする
     this.pool.push(view);
     this.running--;
 
-    // まだキューに残りがあれば再帰的に処理を続ける
+    // キューに残りがあれば続けて処理（再帰）
     this.next();
   }
 }

@@ -358,9 +358,9 @@ export default function startAPI() {
         rate = data.rates.JPY;
       }
       console.log(`Scraping ${ids.length} resources with rate ${rate}`);
-      const jobInfo = queue.createJobInfo(rate, ids, req.body.jobId);
+      const jobId = queue.createJobInfo(rate, ids, req.body.jobId);
       const results = await Promise.all(
-        ids.map(async (id) => await queue.scrape(jobInfo.jobId)),
+        ids.map(async (id) => await queue.scrape(jobId)),
       );
       return res.json(results);
 
