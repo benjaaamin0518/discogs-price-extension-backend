@@ -366,6 +366,7 @@ export default class ScrapeQueue {
     };
 
     try {
+　　　　this.win?.setBrowserView(view);
       // 対象ページへ移動
       await view.webContents.loadURL(
         `https://www.discogs.com/sell/release/${job.resourceId}`,
@@ -434,9 +435,10 @@ export default class ScrapeQueue {
 
     // バッチメタ情報を更新
     this.refreshJobInfos(queue.jobId, result.resourceId);
-
+　　　await view.webContents.loadURL("about:blank");
     // 使用した BrowserView をプールに戻して再利用可能にする
     this.pool.push(view);
+    this.win?.setBrowserView(null);
     this.running--;
 
     // キューに残りがあれば続けて処理（再帰）
