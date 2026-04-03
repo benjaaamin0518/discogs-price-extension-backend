@@ -15,6 +15,7 @@ type ScrapeResult = {
   median: number | null;
   // highest price (after applying rate conversion) or null if unavailable
   highest: number | null;
+  imgUrl?: string | null; // 追加: 画像 URL（存在する場合のみ）
 };
 
 /**
@@ -363,10 +364,11 @@ export default class ScrapeQueue {
       lowest: null,
       median: null,
       highest: null,
+      imgUrl: null,
     };
 
     try {
-　　　　this.win?.setBrowserView(view);
+      this.win?.setBrowserView(view);
       // 対象ページへ移動
       await view.webContents.loadURL(
         `https://www.discogs.com/sell/release/${job.resourceId}`,
@@ -374,10 +376,17 @@ export default class ScrapeQueue {
 
       // ページ内から統計情報を抽出する簡易スクリプトを実行
       // -> DOM 構造が変わると取得できなくなるため、取得箇所の堅牢化やフォールバックを検討してください
-      const text = await view.webContents.executeJavaScript(`
+      const { text, imgUrl } = await view.webContents.executeJavaScript(`
 
         (()=>{
+          const imgEl = document.querySelector(".image_gallery.image_gallery_large");
+          const data = imgEl?.getAttribute("data-images");
 
+          const images = data ? JSON.parse(data) : [];
+          console.log(images);
+
+          // サムネ
+          const imgUrl = images[0]?.thumb;
           const el = document.querySelector("#statistics ul.last")
           const lis = el.querySelectorAll("li")
 
@@ -398,7 +407,7 @@ export default class ScrapeQueue {
 
           })
 
-          return text
+          return {text, imgUrl}
 
         })()
 
@@ -422,6 +431,7 @@ export default class ScrapeQueue {
               parseFloat(text.highest.replace(/[^0-9.]/g, "")) * jobInfo.rate,
             )
           : null,
+        imgUrl: imgUrl ?? null,
       };
       // 正常取得時のログと Promise 解決
       console.log(`Scraped resourceId ${job.resourceId}:`, result);
@@ -435,7 +445,7 @@ export default class ScrapeQueue {
 
     // バッチメタ情報を更新
     this.refreshJobInfos(queue.jobId, result.resourceId);
-　　　await view.webContents.loadURL("about:blank");
+    await view.webContents.loadURL("about:blank");
     // 使用した BrowserView をプールに戻して再利用可能にする
     this.pool.push(view);
     this.win?.setBrowserView(null);
