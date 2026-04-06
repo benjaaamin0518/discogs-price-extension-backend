@@ -16,6 +16,7 @@ type ScrapeResult = {
   // highest price (after applying rate conversion) or null if unavailable
   highest: number | null;
   imgUrl?: string | null; // 追加: 画像 URL（存在する場合のみ）
+  listingCount?: string | null; // 追加: 出品数（存在する場合のみ）
 };
 
 /**
@@ -365,6 +366,7 @@ export default class ScrapeQueue {
       median: null,
       highest: null,
       imgUrl: null,
+      listingCount: null,
     };
 
     try {
@@ -376,17 +378,40 @@ export default class ScrapeQueue {
 
       // ページ内から統計情報を抽出する簡易スクリプトを実行
       // -> DOM 構造が変わると取得できなくなるため、取得箇所の堅牢化やフォールバックを検討してください
-      const { text, imgUrl } = await view.webContents.executeJavaScript(`
+      const { text, imgUrl, listingCount } = await view.webContents
+        .executeJavaScript(`
 
         (()=>{
           const imgEl = document.querySelector(".image_gallery.image_gallery_large");
           const data = imgEl?.getAttribute("data-images");
 
           const images = data ? JSON.parse(data) : [];
-          console.log(images);
 
           // サムネ
           const imgUrl = images[0]?.thumb;
+
+          const listingCountEl = document.querySelector('.pagination_total');
+          let listingCountText = listingCountEl ? listingCountEl.textContent : null;
+
+          // 全角→半角
+          listingCountText = listingCountText.replace(/[！-～]/g, s =>
+            String.fromCharCode(s.charCodeAt(0) - 0xFEE0)
+          )
+          // ゼロ幅文字削除
+          .replace(/[\u200B-\u200D\uFEFF]/g, '')
+          // 空白正規化
+          .replace(/\s+/g, ' ');
+
+          // 空白正規化
+          listingCountText = listingCountText.replace(/\s+/g, ' ');
+
+          // ダッシュ統一
+          listingCountText = listingCountText.replace(/[–—]/g, '-');
+
+          let match = listingCountText.match(/-(?:\s| )+(.+)/);
+          match = match[1].trim().split(' ');
+          const listingCount = match ? Number(match[0]) : null;
+
           const el = document.querySelector("#statistics ul.last")
           const lis = el.querySelectorAll("li")
 
@@ -407,7 +432,7 @@ export default class ScrapeQueue {
 
           })
 
-          return {text, imgUrl}
+          return {text, imgUrl, listingCount};
 
         })()
 
@@ -432,6 +457,7 @@ export default class ScrapeQueue {
             )
           : null,
         imgUrl: imgUrl ?? null,
+        listingCount: listingCount ?? null,
       };
       // 正常取得時のログと Promise 解決
       console.log(`Scraped resourceId ${job.resourceId}:`, result);
