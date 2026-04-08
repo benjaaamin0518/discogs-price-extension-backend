@@ -408,9 +408,8 @@ export default class ScrapeQueue {
           // ダッシュ統一
           listingCountText = listingCountText.replace(/[–—]/g, '-');
 
-          let match = listingCountText.match(/-(?:\s| )+(.+)/);
-          match = match[1].trim().split(' ');
-          const listingCount = match ? Number(match[0]) : null;
+          const numbers = listingCountText.match(/[0-9０-９]+/g);
+          const listingCount = numbers ? Math.max(...numbers.map(Number)) : null;
 
           const el = document.querySelector("#statistics ul.last")
           const lis = el.querySelectorAll("li")
